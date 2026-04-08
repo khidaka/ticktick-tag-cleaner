@@ -183,7 +183,9 @@ async function main() {
         );
         await updateTask(accessToken, task, {
           tags: newTags,
+          startDate: null,
           dueDate: todayISO(),
+          isAllDay: true,
         });
         let oldTag = task.tags.find(tag => POSTPONED_REGEX.test(tag));
         let newTag = incrementPostponedTag(oldTag);
