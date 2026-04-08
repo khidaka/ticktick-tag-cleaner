@@ -1,5 +1,7 @@
 // TickTickTagCleaner.js
-// 繰り返しタスクから postponed_* タグを自動削除するスクリプト（Scriptable用）
+// 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
+// - 期限切れでない → タグを削除
+// - 期限切れ → タグの数字をインクリメントし、期日を今日に変更
 // iOSショートカットの自動化から毎日実行する
 
 const TAG_PREFIX = "postponed_";
@@ -99,17 +101,57 @@ async function getAllTasks(accessToken) {
 }
 
 // ============================================
-// タスクのタグを更新
+// タスクを更新
 // ============================================
-async function updateTaskTags(accessToken, task, newTags) {
-  // 必要最小限のフィールドのみ送信して安全に更新
+async function updateTask(accessToken, task, updates) {
   let updateBody = {
     id: task.id,
     projectId: task.projectId,
-    tags: newTags,
+    ...updates,
   };
 
   return await apiPost(accessToken, `/task/${task.id}`, updateBody);
+}
+
+// ============================================
+// postponed_Nd タグの解析とインクリメント
+// ============================================
+const POSTPONED_REGEX = /^postponed_(\d+)d$/;
+
+function parsePostponedTag(tag) {
+  let match = tag.match(POSTPONED_REGEX);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function incrementPostponedTag(tag) {
+  let days = parsePostponedTag(tag);
+  if (days === null) return tag;
+  return `postponed_${days + 1}d`;
+}
+
+// ============================================
+// タスクが期限切れかどうか判定
+// ============================================
+function isOverdue(task) {
+  if (!task.dueDate) return false;
+  let dueDate = new Date(task.dueDate);
+  let today = new Date();
+  // 日付部分のみ比較（時刻を無視）
+  dueDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  return dueDate < today;
+}
+
+// ============================================
+// 今日の日付をISO文字列で取得（TickTick API用）
+// ============================================
+function todayISO() {
+  let d = new Date();
+  // TickTick APIのdueDate形式に合わせてISO文字列を生成
+  let year = d.getFullYear();
+  let month = String(d.getMonth() + 1).padStart(2, "0");
+  let day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}T00:00:00.000+0000`;
 }
 
 // ============================================
@@ -119,8 +161,8 @@ async function main() {
   let accessToken = await getValidToken();
   let allTasks = await getAllTasks(accessToken);
 
-  let cleaned = 0;
-  let cleanedNames = [];
+  let cleanedTasks = [];
+  let postponedTasks = [];
 
   for (let task of allTasks) {
     // 繰り返しタスクでないものはスキップ
@@ -129,33 +171,45 @@ async function main() {
     // タグがないものはスキップ
     if (!task.tags || task.tags.length === 0) continue;
 
-    // postponed_* タグをフィルタ
-    let originalLength = task.tags.length;
-    let filteredTags = task.tags.filter(
-      tag => !tag.startsWith(TAG_PREFIX)
-    );
+    // postponed_* タグがあるかチェック
+    let hasPostponedTag = task.tags.some(tag => POSTPONED_REGEX.test(tag));
+    if (!hasPostponedTag) continue;
 
-    // 削除対象のタグがなければスキップ
-    if (filteredTags.length === originalLength) continue;
-
-    // タグを更新
     try {
-      await updateTaskTags(accessToken, task, filteredTags);
-      cleaned++;
-      cleanedNames.push(task.title);
+      if (isOverdue(task)) {
+        // 期限切れ: タグをインクリメントして期日を今日に変更
+        let newTags = task.tags.map(tag =>
+          POSTPONED_REGEX.test(tag) ? incrementPostponedTag(tag) : tag
+        );
+        await updateTask(accessToken, task, {
+          tags: newTags,
+          dueDate: todayISO(),
+        });
+        let oldTag = task.tags.find(tag => POSTPONED_REGEX.test(tag));
+        let newTag = incrementPostponedTag(oldTag);
+        postponedTasks.push(`${task.title} (${oldTag} → ${newTag})`);
+      } else {
+        // 期限切れでない: postponed_* タグを削除
+        let filteredTags = task.tags.filter(tag => !POSTPONED_REGEX.test(tag));
+        await updateTask(accessToken, task, { tags: filteredTags });
+        cleanedTasks.push(task.title);
+      }
     } catch (e) {
       console.log(`タスク「${task.title}」の更新に失敗: ${e.message}`);
     }
   }
 
-  let summary;
-  if (cleaned === 0) {
-    summary = "クリーンアップ対象のタスクはありませんでした。";
-  } else {
-    summary = `${cleaned}件のタスクからpostponedタグを削除しました:\n${cleanedNames.join("\n")}`;
+  let lines = [];
+  if (cleanedTasks.length > 0) {
+    lines.push(`タグ削除 ${cleanedTasks.length}件:\n${cleanedTasks.join("\n")}`);
   }
-
-  return summary;
+  if (postponedTasks.length > 0) {
+    lines.push(`遅延インクリメント ${postponedTasks.length}件:\n${postponedTasks.join("\n")}`);
+  }
+  if (lines.length === 0) {
+    return "対象のタスクはありませんでした。";
+  }
+  return lines.join("\n\n");
 }
 
 // ============================================
