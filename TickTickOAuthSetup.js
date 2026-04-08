@@ -59,7 +59,6 @@ function openAuthPage() {
 // 手動で認証コードを入力（リダイレクトが機能しない場合のフォールバック）
 // ============================================
 async function manualCodeEntry() {
-  // まず認証ページを開く
   let infoAlert = new Alert();
   infoAlert.title = "手動認証の手順";
   infoAlert.message = "1. 次の画面でブラウザが開きます\n"
@@ -69,7 +68,6 @@ async function manualCodeEntry() {
   infoAlert.addAction("ブラウザを開く");
   await infoAlert.presentAlert();
 
-  // リダイレクトURIを一時的にlocalhostにして認証ページを開く
   const authURL = "https://ticktick.com/oauth/authorize"
     + `?client_id=${encodeURIComponent(CLIENT_ID)}`
     + `&scope=${encodeURIComponent(SCOPES)}`
@@ -79,7 +77,6 @@ async function manualCodeEntry() {
 
   Safari.open(authURL);
 
-  // コード入力を待つ
   let codeAlert = new Alert();
   codeAlert.title = "認証コードを入力";
   codeAlert.message = "ブラウザのリダイレクト先URLから「code=」の値を貼り付けてください";
@@ -101,51 +98,125 @@ async function manualCodeEntry() {
 
 // ============================================
 // 認証コードをアクセストークンに交換
+// 複数の認証方式を試行（TickTick APIの仕様が環境により異なるため）
 // ============================================
 async function exchangeCodeForTokens(code) {
-  try {
-    let req = new Request("https://ticktick.com/oauth/token");
-    req.method = "POST";
-    req.headers = {
-      "Content-Type": "application/x-www-form-urlencoded",
-    };
+  const strategies = [
+    {
+      name: "Body params only",
+      useBasicAuth: false,
+      includeClientInBody: true,
+      includeScope: false,
+    },
+    {
+      name: "Body params + scope",
+      useBasicAuth: false,
+      includeClientInBody: true,
+      includeScope: true,
+    },
+    {
+      name: "Basic auth + body params",
+      useBasicAuth: true,
+      includeClientInBody: true,
+      includeScope: true,
+    },
+    {
+      name: "Basic auth only",
+      useBasicAuth: true,
+      includeClientInBody: false,
+      includeScope: true,
+    },
+  ];
 
-    // Basic認証ヘッダーを追加（TickTick APIが要求する場合）
+  let lastResponse = null;
+
+  for (let strategy of strategies) {
+    try {
+      console.log(`Trying: ${strategy.name}`);
+      let tokenData = await tryTokenExchange(code, strategy);
+
+      if (tokenData && tokenData.access_token) {
+        console.log(`Success with: ${strategy.name}`);
+        await saveTokens(tokenData, strategy.name);
+        return;
+      }
+
+      lastResponse = tokenData;
+      console.log(`No access_token with ${strategy.name}: ${JSON.stringify(tokenData)}`);
+    } catch (e) {
+      lastResponse = e.message;
+      console.log(`Error with ${strategy.name}: ${e.message}`);
+    }
+  }
+
+  await showAlert(
+    "トークン取得失敗",
+    "全ての認証方式が失敗しました。\n\n"
+      + `最後のレスポンス:\n${JSON.stringify(lastResponse, null, 2)}\n\n`
+      + "確認事項:\n"
+      + "1. Client IDとClient Secretが正しいか\n"
+      + "2. developer.ticktick.comのRedirect URIが\n   " + REDIRECT_URI + "\n   と一致しているか\n"
+      + "3. 認証コードが期限切れでないか（取得後すぐに使用してください）"
+  );
+}
+
+async function tryTokenExchange(code, strategy) {
+  let req = new Request("https://ticktick.com/oauth/token");
+  req.method = "POST";
+  req.headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+
+  if (strategy.useBasicAuth) {
     const basicAuth = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
     req.headers["Authorization"] = `Basic ${basicAuth}`;
-
-    req.body = "grant_type=authorization_code"
-      + `&code=${encodeURIComponent(code)}`
-      + `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-
-    let tokenData = await req.loadJSON();
-
-    if (!tokenData.access_token) {
-      await showAlert("トークン取得失敗", JSON.stringify(tokenData, null, 2));
-      return;
-    }
-
-    // Keychainに保存
-    let tokens = {
-      access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token || null,
-      expires_at: Date.now() + ((tokenData.expires_in || 3600) * 1000),
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-    };
-
-    Keychain.set(KEYCHAIN_KEY, JSON.stringify(tokens));
-
-    await showAlert(
-      "認証成功",
-      "TickTickトークンをKeychainに保存しました。\n\n"
-        + `アクセストークン: ${tokenData.access_token.substring(0, 10)}...\n`
-        + `リフレッシュトークン: ${tokenData.refresh_token ? "あり" : "なし"}\n`
-        + `有効期限: ${tokenData.expires_in || 3600}秒`
-    );
-  } catch (error) {
-    await showAlert("エラー", `トークン交換に失敗しました:\n${error.message}`);
   }
+
+  let bodyParts = [
+    "grant_type=authorization_code",
+    `code=${encodeURIComponent(code)}`,
+    `redirect_uri=${encodeURIComponent(REDIRECT_URI)}`,
+  ];
+
+  if (strategy.includeClientInBody) {
+    bodyParts.push(`client_id=${encodeURIComponent(CLIENT_ID)}`);
+    bodyParts.push(`client_secret=${encodeURIComponent(CLIENT_SECRET)}`);
+  }
+
+  if (strategy.includeScope) {
+    bodyParts.push(`scope=${encodeURIComponent(SCOPES)}`);
+  }
+
+  req.body = bodyParts.join("&");
+
+  console.log(`Request body: ${req.body}`);
+  console.log(`Headers: ${JSON.stringify(req.headers)}`);
+
+  return await req.loadJSON();
+}
+
+// ============================================
+// トークンを保存
+// ============================================
+async function saveTokens(tokenData, strategyName) {
+  let tokens = {
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || null,
+    expires_at: Date.now() + ((tokenData.expires_in || 3600) * 1000),
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+  };
+
+  Keychain.set(KEYCHAIN_KEY, JSON.stringify(tokens));
+
+  await showAlert(
+    "認証成功",
+    "TickTickトークンをKeychainに保存しました。\n\n"
+      + `方式: ${strategyName}\n`
+      + `アクセストークン: ${tokenData.access_token.substring(0, 10)}...\n`
+      + `リフレッシュトークン: ${tokenData.refresh_token ? "あり" : "なし"}\n`
+      + `有効期限: ${tokenData.expires_in || 3600}秒`
+  );
 }
 
 // ============================================
