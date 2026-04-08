@@ -163,22 +163,19 @@ async function main() {
 
   let cleanedTasks = [];
   let postponedTasks = [];
+  let newlyPostponedTasks = [];
 
   for (let task of allTasks) {
     // 繰り返しタスクでないものはスキップ
     if (!task.repeatFlag) continue;
 
-    // タグがないものはスキップ
-    if (!task.tags || task.tags.length === 0) continue;
-
-    // postponed_* タグがあるかチェック
-    let hasPostponedTag = task.tags.some(tag => POSTPONED_REGEX.test(tag));
-    if (!hasPostponedTag) continue;
+    let tags = task.tags || [];
+    let hasPostponedTag = tags.some(tag => POSTPONED_REGEX.test(tag));
 
     try {
-      if (isOverdue(task)) {
-        // 期限切れ: タグをインクリメントして期日を今日に変更
-        let newTags = task.tags.map(tag =>
+      if (isOverdue(task) && hasPostponedTag) {
+        // 既存のpostponedタグをインクリメントして期日を今日に変更
+        let newTags = tags.map(tag =>
           POSTPONED_REGEX.test(tag) ? incrementPostponedTag(tag) : tag
         );
         await updateTask(accessToken, task, {
@@ -187,12 +184,22 @@ async function main() {
           dueDate: todayISO(),
           isAllDay: true,
         });
-        let oldTag = task.tags.find(tag => POSTPONED_REGEX.test(tag));
+        let oldTag = tags.find(tag => POSTPONED_REGEX.test(tag));
         let newTag = incrementPostponedTag(oldTag);
         postponedTasks.push(`${task.title} (${oldTag} → ${newTag})`);
-      } else {
+      } else if (isOverdue(task) && !hasPostponedTag) {
+        // 新たに期限切れ: postponed_1d を追加して期日を今日に変更
+        let newTags = [...tags, "postponed_1d"];
+        await updateTask(accessToken, task, {
+          tags: newTags,
+          startDate: null,
+          dueDate: todayISO(),
+          isAllDay: true,
+        });
+        newlyPostponedTasks.push(task.title);
+      } else if (!isOverdue(task) && hasPostponedTag) {
         // 期限切れでない: postponed_* タグを削除
-        let filteredTags = task.tags.filter(tag => !POSTPONED_REGEX.test(tag));
+        let filteredTags = tags.filter(tag => !POSTPONED_REGEX.test(tag));
         await updateTask(accessToken, task, { tags: filteredTags });
         cleanedTasks.push(task.title);
       }
@@ -204,6 +211,9 @@ async function main() {
   let lines = [];
   if (cleanedTasks.length > 0) {
     lines.push(`タグ削除 ${cleanedTasks.length}件:\n${cleanedTasks.join("\n")}`);
+  }
+  if (newlyPostponedTasks.length > 0) {
+    lines.push(`新規遅延 ${newlyPostponedTasks.length}件:\n${newlyPostponedTasks.join("\n")}`);
   }
   if (postponedTasks.length > 0) {
     lines.push(`遅延インクリメント ${postponedTasks.length}件:\n${postponedTasks.join("\n")}`);
