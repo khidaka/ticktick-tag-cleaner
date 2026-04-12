@@ -104,11 +104,14 @@ async function getAllTasks(accessToken) {
 // タスクを更新
 // ============================================
 async function updateTask(accessToken, task, updates) {
-  let updateBody = {
-    id: task.id,
-    projectId: task.projectId,
-    ...updates,
-  };
+  // タスク全体をコピーし、更新内容で上書きして送信
+  // 部分更新だとAPIが一部フィールドを無視する場合がある
+  let updateBody = { ...task, ...updates };
+
+  // startDateをクリアする場合はフィールド自体を削除
+  if (updates.startDate === null) {
+    delete updateBody.startDate;
+  }
 
   return await apiPost(accessToken, `/task/${task.id}`, updateBody);
 }
