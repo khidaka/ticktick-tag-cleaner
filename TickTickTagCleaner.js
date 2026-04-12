@@ -1,5 +1,5 @@
 // TickTickTagCleaner.js
-// version: 1.4.0 (2026-04-12)
+// version: 1.5.0 (2026-04-12)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
 // - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
@@ -110,9 +110,10 @@ async function updateTask(accessToken, task, updates) {
   // 部分更新だとAPIが一部フィールドを無視する場合がある
   let updateBody = { ...task, ...updates };
 
-  // startDateをクリアする場合はフィールド自体を削除
+  // startDateをクリアする場合は空文字列で明示的に上書き
+  // （フィールド省略だとAPIが既存値を保持してしまうため）
   if (updates.startDate === null) {
-    delete updateBody.startDate;
+    updateBody.startDate = "";
   }
 
   return await apiPost(accessToken, `/task/${task.id}`, updateBody);
@@ -149,13 +150,20 @@ function isOverdue(task) {
 
 // ============================================
 // 今日の日付をISO文字列で取得（TickTick API用）
+// 既存タスクのdueDateフォーマットに合わせる
 // ============================================
-function todayISO() {
+function todayISO(existingDueDate) {
   let d = new Date();
-  // TickTick APIのdueDate形式に合わせてISO文字列を生成
   let year = d.getFullYear();
   let month = String(d.getMonth() + 1).padStart(2, "0");
   let day = String(d.getDate()).padStart(2, "0");
+
+  // 既存のdueDateがあればその時刻部分を流用（フォーマットを合わせる）
+  if (existingDueDate) {
+    let timePart = existingDueDate.replace(/^\d{4}-\d{2}-\d{2}/, "");
+    return `${year}-${month}-${day}${timePart}`;
+  }
+
   return `${year}-${month}-${day}T00:00:00.000+0000`;
 }
 
@@ -186,7 +194,7 @@ async function main() {
         await updateTask(accessToken, task, {
           tags: newTags,
           startDate: null,
-          dueDate: todayISO(),
+          dueDate: todayISO(task.dueDate),
           isAllDay: true,
         });
         let oldTag = tags.find(tag => POSTPONED_REGEX.test(tag));
@@ -198,7 +206,7 @@ async function main() {
         await updateTask(accessToken, task, {
           tags: newTags,
           startDate: null,
-          dueDate: todayISO(),
+          dueDate: todayISO(task.dueDate),
           isAllDay: true,
         });
         newlyPostponedTasks.push(task.title);
