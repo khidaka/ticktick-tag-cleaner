@@ -1,7 +1,9 @@
 // TickTickTagCleaner.js
+// version: 1.4.0 (2026-04-12)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
-// - 期限切れ → タグの数字をインクリメントし、期日を今日に変更
+// - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
+// - 期限切れ + postponedタグなし → postponed_1d を付与し、期日を今日に変更
 // iOSショートカットの自動化から毎日実行する
 
 const TAG_PREFIX = "postponed_";

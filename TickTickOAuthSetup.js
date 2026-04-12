@@ -1,4 +1,5 @@
 // TickTickOAuthSetup.js
+// version: 1.2.0 (2026-04-12)
 // 1回限りのOAuth2認証スクリプト（Scriptable用）
 // 使い方: Scriptableアプリでこのスクリプトを実行してTickTickアカウントを認証する
 
