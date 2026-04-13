@@ -1,5 +1,5 @@
 // TickTickTagCleaner.js
-// version: 1.5.0 (2026-04-12)
+// version: 1.6.0 (2026-04-13)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
 // - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
@@ -107,13 +107,12 @@ async function getAllTasks(accessToken) {
 // ============================================
 async function updateTask(accessToken, task, updates) {
   // タスク全体をコピーし、更新内容で上書きして送信
-  // 部分更新だとAPIが一部フィールドを無視する場合がある
   let updateBody = { ...task, ...updates };
 
-  // startDateをクリアする場合は空文字列で明示的に上書き
-  // （フィールド省略だとAPIが既存値を保持してしまうため）
-  if (updates.startDate === null) {
-    updateBody.startDate = "";
+  // startDateをdueDateと同じ値に揃えて期間表示を消す
+  // （空文字やnullでは既存値が保持されてしまうため）
+  if (updates.dueDate) {
+    updateBody.startDate = updates.dueDate;
   }
 
   return await apiPost(accessToken, `/task/${task.id}`, updateBody);
@@ -193,7 +192,6 @@ async function main() {
         );
         await updateTask(accessToken, task, {
           tags: newTags,
-          startDate: null,
           dueDate: todayISO(task.dueDate),
           isAllDay: true,
         });
@@ -205,7 +203,6 @@ async function main() {
         let newTags = [...tags, "postponed_1d"];
         await updateTask(accessToken, task, {
           tags: newTags,
-          startDate: null,
           dueDate: todayISO(task.dueDate),
           isAllDay: true,
         });
