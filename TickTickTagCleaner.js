@@ -1,5 +1,5 @@
 // TickTickTagCleaner.js
-// version: 1.6.0 (2026-04-13)
+// version: 1.7.0 (2026-04-13)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
 // - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
@@ -149,21 +149,22 @@ function isOverdue(task) {
 
 // ============================================
 // 今日の日付をISO文字列で取得（TickTick API用）
-// 既存タスクのdueDateフォーマットに合わせる
+// ローカルタイムゾーンのオフセットを使い、正しく「今日」を表現する
 // ============================================
-function todayISO(existingDueDate) {
+function todayISO() {
   let d = new Date();
   let year = d.getFullYear();
   let month = String(d.getMonth() + 1).padStart(2, "0");
   let day = String(d.getDate()).padStart(2, "0");
 
-  // 既存のdueDateがあればその時刻部分を流用（フォーマットを合わせる）
-  if (existingDueDate) {
-    let timePart = existingDueDate.replace(/^\d{4}-\d{2}-\d{2}/, "");
-    return `${year}-${month}-${day}${timePart}`;
-  }
+  // ローカルのタイムゾーンオフセットを算出（例: JST = +0900）
+  let offsetMin = -d.getTimezoneOffset();
+  let sign = offsetMin >= 0 ? "+" : "-";
+  let absMin = Math.abs(offsetMin);
+  let offsetH = String(Math.floor(absMin / 60)).padStart(2, "0");
+  let offsetM = String(absMin % 60).padStart(2, "0");
 
-  return `${year}-${month}-${day}T00:00:00.000+0000`;
+  return `${year}-${month}-${day}T00:00:00.000${sign}${offsetH}${offsetM}`;
 }
 
 // ============================================
@@ -192,7 +193,7 @@ async function main() {
         );
         await updateTask(accessToken, task, {
           tags: newTags,
-          dueDate: todayISO(task.dueDate),
+          dueDate: todayISO(),
           isAllDay: true,
         });
         let oldTag = tags.find(tag => POSTPONED_REGEX.test(tag));
@@ -203,7 +204,7 @@ async function main() {
         let newTags = [...tags, "postponed_1d"];
         await updateTask(accessToken, task, {
           tags: newTags,
-          dueDate: todayISO(task.dueDate),
+          dueDate: todayISO(),
           isAllDay: true,
         });
         newlyPostponedTasks.push(task.title);
