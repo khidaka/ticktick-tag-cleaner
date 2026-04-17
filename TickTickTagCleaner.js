@@ -1,11 +1,19 @@
 // TickTickTagCleaner.js
 // version: 1.9.0 (2026-04-17)
-// 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
-// - 期限切れでない → タグを削除
-// - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
-// - 期限切れ + postponedタグなし → postponed_1d を付与し、期日を今日に変更
-// - 全タスクのピンを解除（isPin フィールドを使用）
-// iOSショートカットの自動化から毎日実行する
+// 繰り返しタスクの postponed_* タグを自動管理し、毎朝をリセットするスクリプト（Scriptable用）
+//
+// 実行時に以下の処理を行う:
+// 1. 全タスクのピンを解除
+//    - TickTick は sortOrder < -1兆 でピン状態を表現
+//    - ピン済みタスクの sortOrder を 0 にリセット
+// 2. 期限内の繰り返しタスク（postponed_* タグ付き）
+//    - タグを削除してリセット
+// 3. 新たに期限切れになった繰り返しタスク
+//    - postponed_1d を付与し、期日を今日に変更
+// 4. 期限切れ + 既存postponedタグ付きの繰り返しタスク
+//    - タグの数字をインクリメント（1d → 2d）し、期日を今日に変更
+//
+// iOSショートカットのオートメーションから毎日（通常は朝）実行
 
 const TAG_PREFIX = "postponed_";
 const KEYCHAIN_KEY = "ticktick_tokens";
