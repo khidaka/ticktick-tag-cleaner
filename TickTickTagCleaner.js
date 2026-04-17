@@ -1,5 +1,5 @@
 // TickTickTagCleaner.js
-// version: 1.8.0 (2026-04-17)
+// version: 1.9.0 (2026-04-17)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
 // - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
@@ -170,20 +170,23 @@ function todayISO() {
 
 // ============================================
 // ピン解除
-// TickTick API のピンフィールド名: isPin
-// （公式ドキュメント未記載のため、動作しない場合は下記 PIN_FIELD を変更）
+// TickTick はピンを boolean フィールドではなく
+// sortOrder の極端な負の値（< -1兆）で表現している
+// アンピン = sortOrder を 0 にリセット
 // ============================================
-const PIN_FIELD = "isPin";
+const PIN_SORT_ORDER_THRESHOLD = -1_000_000_000_000;
 
 async function unpinAllTasks(accessToken, allTasks) {
-  let pinnedTasks = allTasks.filter(task => task[PIN_FIELD] === true);
+  let pinnedTasks = allTasks.filter(
+    task => typeof task.sortOrder === "number" && task.sortOrder < PIN_SORT_ORDER_THRESHOLD
+  );
 
   if (pinnedTasks.length === 0) return [];
 
   let unpinnedNames = [];
   for (let task of pinnedTasks) {
     try {
-      await updateTask(accessToken, task, { [PIN_FIELD]: false });
+      await updateTask(accessToken, task, { sortOrder: 0 });
       unpinnedNames.push(task.title);
     } catch (e) {
       console.log(`タスク「${task.title}」のピン解除に失敗: ${e.message}`);
