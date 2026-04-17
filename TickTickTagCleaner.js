@@ -1,9 +1,10 @@
 // TickTickTagCleaner.js
-// version: 1.7.0 (2026-04-13)
+// version: 1.8.0 (2026-04-17)
 // 繰り返しタスクの postponed_* タグを自動管理するスクリプト（Scriptable用）
 // - 期限切れでない → タグを削除
 // - 期限切れ + postponedタグあり → タグの数字をインクリメントし、期日を今日に変更
 // - 期限切れ + postponedタグなし → postponed_1d を付与し、期日を今日に変更
+// - 全タスクのピンを解除（isPin フィールドを使用）
 // iOSショートカットの自動化から毎日実行する
 
 const TAG_PREFIX = "postponed_";
@@ -168,6 +169,30 @@ function todayISO() {
 }
 
 // ============================================
+// ピン解除
+// TickTick API のピンフィールド名: isPin
+// （公式ドキュメント未記載のため、動作しない場合は下記 PIN_FIELD を変更）
+// ============================================
+const PIN_FIELD = "isPin";
+
+async function unpinAllTasks(accessToken, allTasks) {
+  let pinnedTasks = allTasks.filter(task => task[PIN_FIELD] === true);
+
+  if (pinnedTasks.length === 0) return [];
+
+  let unpinnedNames = [];
+  for (let task of pinnedTasks) {
+    try {
+      await updateTask(accessToken, task, { [PIN_FIELD]: false });
+      unpinnedNames.push(task.title);
+    } catch (e) {
+      console.log(`タスク「${task.title}」のピン解除に失敗: ${e.message}`);
+    }
+  }
+  return unpinnedNames;
+}
+
+// ============================================
 // メインロジック
 // ============================================
 async function main() {
@@ -219,7 +244,13 @@ async function main() {
     }
   }
 
+  // ピン解除
+  let unpinnedTasks = await unpinAllTasks(accessToken, allTasks);
+
   let lines = [];
+  if (unpinnedTasks.length > 0) {
+    lines.push(`ピン解除 ${unpinnedTasks.length}件:\n${unpinnedTasks.join("\n")}`);
+  }
   if (cleanedTasks.length > 0) {
     lines.push(`タグ削除 ${cleanedTasks.length}件:\n${cleanedTasks.join("\n")}`);
   }
