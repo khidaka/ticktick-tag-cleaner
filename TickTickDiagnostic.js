@@ -1,7 +1,7 @@
 // TickTickDiagnostic.js
-// version: 1.0.0 (2026-04-17)
-// ピン済みタスクの生データを確認するための診断スクリプト
-// TickTickTagCleaner.js のピン解除機能が動かない場合に使用
+// version: 2.0.0 (2026-04-18)
+// ピン済みタスクと非ピンタスクのフィールドを比較して
+// 本当にピンを表すフィールドを特定するための診断スクリプト
 
 const KEYCHAIN_KEY = "ticktick_tokens";
 const API_BASE = "https://api.ticktick.com/open/v1";
@@ -47,51 +47,82 @@ async function getAllTasks(accessToken) {
   return allTasks;
 }
 
+async function pickTaskByKeyword(allTasks, promptText) {
+  let alert = new Alert();
+  alert.title = "タスク選択";
+  alert.message = promptText;
+  alert.addTextField("タスク名の一部");
+  alert.addAction("OK");
+  alert.addCancelAction("キャンセル");
+  let r = await alert.presentAlert();
+  if (r === -1) return null;
+  let keyword = alert.textFieldValue(0).trim().toLowerCase();
+  if (!keyword) return null;
+  let matched = allTasks.filter(t => t.title && t.title.toLowerCase().includes(keyword));
+  if (matched.length === 0) {
+    await showAlert("見つかりません", `「${keyword}」に一致するタスクがありませんでした。`);
+    return null;
+  }
+  return matched[0];
+}
+
+function formatTask(task) {
+  return Object.entries(task)
+    .filter(([k, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+    .join("\n");
+}
+
 async function main() {
   let accessToken = await getValidToken();
   let allTasks = await getAllTasks(accessToken);
 
-  // ピン済みの可能性があるタスクを探す（booleanフィールドがtrueのもの）
-  // 画面でピン留めしたタスク名を選んで確認
-  let alert = new Alert();
-  alert.title = "診断: タスク選択";
-  alert.message = "ピン済みのタスク名を入力してください（部分一致）";
-  alert.addTextField("タスク名の一部");
-  alert.addAction("検索");
-  alert.addCancelAction("キャンセル");
-  let r = await alert.presentAlert();
-  if (r === -1) return;
-
-  let keyword = alert.textFieldValue(0).trim().toLowerCase();
-  let matched = allTasks.filter(t => t.title && t.title.toLowerCase().includes(keyword));
-
-  if (matched.length === 0) {
-    await showAlert("見つかりません", `「${keyword}」に一致するタスクがありませんでした。`);
-    return;
-  }
-
-  // 最初にマッチしたタスクのフィールドを全て表示
-  let task = matched[0];
-  let fields = Object.entries(task)
-    .filter(([k, v]) => v !== null && v !== undefined && v !== "" && v !== 0)
-    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
-    .join("\n");
-
+  // sortOrder分布を把握
+  let withSortOrder = allTasks.filter(t => typeof t.sortOrder === "number");
+  let sorted = withSortOrder.map(t => t.sortOrder).sort((a, b) => a - b);
+  let negatives = sorted.filter(v => v < 0);
   await showAlert(
-    `「${task.title}」のフィールド`,
-    fields.length > 800 ? fields.substring(0, 800) + "\n...(省略)" : fields
+    "sortOrder 分布",
+    `全タスク: ${allTasks.length}\n` +
+    `sortOrder あり: ${withSortOrder.length}\n` +
+    `負の値: ${negatives.length}件\n` +
+    `最小: ${sorted[0]}\n` +
+    `最大: ${sorted[sorted.length - 1]}\n\n` +
+    `負の値 上位10件（小さい順）:\n${negatives.slice(0, 10).join("\n")}`
   );
 
-  // booleanでtrueのフィールドだけ抽出して別途表示
-  let boolTrueFields = Object.entries(task)
-    .filter(([k, v]) => v === true)
-    .map(([k]) => k);
+  // ピン済みタスクを指定
+  let pinned = await pickTaskByKeyword(allTasks, "【ピン済み】のタスク名を入力");
+  if (!pinned) return;
+
+  // 非ピンのタスクを指定
+  let normal = await pickTaskByKeyword(allTasks, "【ピンなし】のタスク名を入力");
+  if (!normal) return;
+
+  // 両方のフィールドを比較
+  let pinnedStr = formatTask(pinned);
+  let normalStr = formatTask(normal);
 
   await showAlert(
-    "true のbooleanフィールド（ピン候補）",
-    boolTrueFields.length > 0
-      ? boolTrueFields.join(", ")
-      : "true のbooleanフィールドなし\n\n→ ピンは数値や別の形式かもしれません"
+    `【ピン済み】${pinned.title}`,
+    pinnedStr.length > 1200 ? pinnedStr.substring(0, 1200) + "\n..." : pinnedStr
+  );
+  await showAlert(
+    `【ピンなし】${normal.title}`,
+    normalStr.length > 1200 ? normalStr.substring(0, 1200) + "\n..." : normalStr
+  );
+
+  // 差分フィールド抽出
+  let allKeys = new Set([...Object.keys(pinned), ...Object.keys(normal)]);
+  let diffs = [];
+  for (let k of allKeys) {
+    let a = JSON.stringify(pinned[k]);
+    let b = JSON.stringify(normal[k]);
+    if (a !== b) diffs.push(`${k}:\n  ピン済: ${a}\n  ピンなし: ${b}`);
+  }
+  await showAlert(
+    "差分フィールド（ピン特定の手がかり）",
+    diffs.length > 0 ? (diffs.join("\n\n").substring(0, 1500)) : "差分なし"
   );
 }
 

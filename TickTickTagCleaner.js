@@ -1,17 +1,17 @@
 // TickTickTagCleaner.js
-// version: 1.9.0 (2026-04-17)
+// version: 2.0.0 (2026-04-18)
 // 繰り返しタスクの postponed_* タグを自動管理し、毎朝をリセットするスクリプト（Scriptable用）
 //
 // 実行時に以下の処理を行う:
-// 1. 全タスクのピンを解除
-//    - TickTick は sortOrder < -1兆 でピン状態を表現
-//    - ピン済みタスクの sortOrder を 0 にリセット
-// 2. 期限内の繰り返しタスク（postponed_* タグ付き）
+// 1. 期限内の繰り返しタスク（postponed_* タグ付き）
 //    - タグを削除してリセット
-// 3. 新たに期限切れになった繰り返しタスク
+// 2. 新たに期限切れになった繰り返しタスク
 //    - postponed_1d を付与し、期日を今日に変更
-// 4. 期限切れ + 既存postponedタグ付きの繰り返しタスク
+// 3. 期限切れ + 既存postponedタグ付きの繰り返しタスク
 //    - タグの数字をインクリメント（1d → 2d）し、期日を今日に変更
+//
+// 注: ピン解除機能は TickTick Open API がピン状態を公開していないため
+//     実装不可能であることが判明し、v2.0.0 で削除した（v1.8.0-v1.9.0）
 //
 // iOSショートカットのオートメーションから毎日（通常は朝）実行
 
@@ -177,33 +177,6 @@ function todayISO() {
 }
 
 // ============================================
-// ピン解除
-// TickTick はピンを boolean フィールドではなく
-// sortOrder の極端な負の値（< -1兆）で表現している
-// アンピン = sortOrder を 0 にリセット
-// ============================================
-const PIN_SORT_ORDER_THRESHOLD = -1_000_000_000_000;
-
-async function unpinAllTasks(accessToken, allTasks) {
-  let pinnedTasks = allTasks.filter(
-    task => typeof task.sortOrder === "number" && task.sortOrder < PIN_SORT_ORDER_THRESHOLD
-  );
-
-  if (pinnedTasks.length === 0) return [];
-
-  let unpinnedNames = [];
-  for (let task of pinnedTasks) {
-    try {
-      await updateTask(accessToken, task, { sortOrder: 0 });
-      unpinnedNames.push(task.title);
-    } catch (e) {
-      console.log(`タスク「${task.title}」のピン解除に失敗: ${e.message}`);
-    }
-  }
-  return unpinnedNames;
-}
-
-// ============================================
 // メインロジック
 // ============================================
 async function main() {
@@ -255,13 +228,7 @@ async function main() {
     }
   }
 
-  // ピン解除
-  let unpinnedTasks = await unpinAllTasks(accessToken, allTasks);
-
   let lines = [];
-  if (unpinnedTasks.length > 0) {
-    lines.push(`ピン解除 ${unpinnedTasks.length}件:\n${unpinnedTasks.join("\n")}`);
-  }
   if (cleanedTasks.length > 0) {
     lines.push(`タグ削除 ${cleanedTasks.length}件:\n${cleanedTasks.join("\n")}`);
   }
